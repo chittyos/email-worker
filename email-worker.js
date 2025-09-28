@@ -71,6 +71,7 @@ export default {
         postmaster: MGMT_FORWARD,
         mgmt: MGMT_FORWARD,
         management: MGMT_FORWARD,
+        web: MGMT_FORWARD,
 
         // Personal routing
         nick: "nick@jeanarlene.com",
