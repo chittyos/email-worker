@@ -60,13 +60,16 @@ export default {
       let forwardTo = DEFAULT_FORWARD;
 
       // Special routing for specific local parts
+      const MGMT_FORWARD = "mgmt@aribia.llc";
       const specialRoutes = {
-        admin: DEFAULT_FORWARD,
-        support: DEFAULT_FORWARD,
-        legal: DEFAULT_FORWARD,
-        security: DEFAULT_FORWARD,
-        abuse: DEFAULT_FORWARD,
-        postmaster: DEFAULT_FORWARD,
+        admin: MGMT_FORWARD,
+        support: MGMT_FORWARD,
+        legal: MGMT_FORWARD,
+        security: MGMT_FORWARD,
+        abuse: MGMT_FORWARD,
+        postmaster: MGMT_FORWARD,
+        mgmt: MGMT_FORWARD,
+        management: MGMT_FORWARD,
         api: DEFAULT_FORWARD,
         webhook: DEFAULT_FORWARD,
         id: DEFAULT_FORWARD,

@@ -23,7 +23,7 @@ export default {
     });
 
     // Default forwarding address for all domains
-    const DEFAULT_FORWARD = env.DEFAULT_FORWARD || "nick@mrniceweird.com";
+    const DEFAULT_FORWARD = env.DEFAULT_FORWARD || "nick@jeanarlene.com";
 
     // Known domain configurations (can be extended)
     const KNOWN_DOMAINS = {
@@ -60,21 +60,33 @@ export default {
       let forwardTo = DEFAULT_FORWARD;
 
       // Special routing for specific local parts
+      const MGMT_FORWARD = "mgmt@aribia.llc";
       const specialRoutes = {
-        admin: DEFAULT_FORWARD,
-        support: DEFAULT_FORWARD,
-        legal: DEFAULT_FORWARD,
-        security: DEFAULT_FORWARD,
-        abuse: DEFAULT_FORWARD,
-        postmaster: DEFAULT_FORWARD,
+        // Management emails
+        admin: MGMT_FORWARD,
+        support: MGMT_FORWARD,
+        legal: MGMT_FORWARD,
+        security: MGMT_FORWARD,
+        abuse: MGMT_FORWARD,
+        postmaster: MGMT_FORWARD,
+        mgmt: MGMT_FORWARD,
+        management: MGMT_FORWARD,
+
+        // Personal routing
+        nick: "nick@jeanarlene.com",
+        sharon: "sharon@itcanbellc.com",
+
+        // Developer/API emails
         api: DEFAULT_FORWARD,
         webhook: DEFAULT_FORWARD,
         id: DEFAULT_FORWARD,
         dev: DEFAULT_FORWARD,
         info: DEFAULT_FORWARD,
         hello: DEFAULT_FORWARD,
-        noreply: null, // Don't forward
-        "no-reply": null, // Don't forward
+
+        // Don't forward
+        noreply: null,
+        "no-reply": null,
       };
 
       // Check for no-reply addresses
@@ -157,7 +169,7 @@ export default {
 
       // Fallback forwarding
       try {
-        await message.forward(DEFAULT_FORWARD);
+        await message.forward("nick@jeanarlene.com");
       } catch (fallbackError) {
         console.error(`[${transactionId}] Fallback failed:`, fallbackError);
       }
