@@ -1,0 +1,45 @@
+{
+  "name": "@chittyos/email-worker",
+  "version": "1.0.0",
+  "description": "Multi-domain email routing worker for ChittyOS domains",
+  "main": "email-worker.js",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail email-worker",
+    "test": "echo \"No tests configured yet\""
+  },
+  "keywords": [
+    "cloudflare",
+    "email",
+    "worker",
+    "chittyos",
+    "routing",
+    "google-workspace"
+  ],
+  "author": {
+    "name": "ChittyOS Framework",
+    "email": "admin@chittyos.com",
+    "url": "https://chittyos.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chittyos/email-worker.git"
+  },
+  "bugs": {
+    "url": "https://github.com/chittyos/email-worker/issues"
+  },
+  "homepage": "https://github.com/chittyos/email-worker#readme",
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}

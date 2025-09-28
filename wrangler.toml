@@ -1,0 +1,24 @@
+name = "email-worker"
+main = "email-worker.js"
+compatibility_date = "2024-09-15"
+compatibility_flags = ["nodejs_compat"]
+
+# Email routing trigger
+# Email routing is configured in Cloudflare Dashboard
+# This worker handles email for multiple domains including nevershitty.com
+# Configure custom addresses in Cloudflare Dashboard
+# This worker will handle all @nevershitty.com emails
+
+# Optional: KV namespace for email analytics
+# [[kv_namespaces]]
+# binding = "EMAIL_ANALYTICS"
+# id = "your-kv-namespace-id"
+
+# Environment variables
+[vars]
+DOMAIN = "nevershitty.com"
+ENVIRONMENT = "production"
+
+# Secrets (add via wrangler)
+# wrangler secret put GOOGLE_WORKSPACE_API_KEY
+# wrangler secret put CLOUDFLARE_API_TOKEN
