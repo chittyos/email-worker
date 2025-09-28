@@ -23,7 +23,7 @@ export default {
     });
 
     // Default forwarding address for all domains
-    const DEFAULT_FORWARD = env.DEFAULT_FORWARD || "nick@mrniceweird.com";
+    const DEFAULT_FORWARD = env.DEFAULT_FORWARD || "no-reply@itcan.llc";
 
     // Known domain configurations (can be extended)
     const KNOWN_DOMAINS = {
@@ -62,6 +62,7 @@ export default {
       // Special routing for specific local parts
       const MGMT_FORWARD = "mgmt@aribia.llc";
       const specialRoutes = {
+        // Management emails
         admin: MGMT_FORWARD,
         support: MGMT_FORWARD,
         legal: MGMT_FORWARD,
@@ -70,14 +71,22 @@ export default {
         postmaster: MGMT_FORWARD,
         mgmt: MGMT_FORWARD,
         management: MGMT_FORWARD,
+
+        // Personal routing
+        nick: "nick@jeanarlene.com",
+        sharon: "sharon@itcanbellc.com",
+
+        // Developer/API emails (use default catch-all)
         api: DEFAULT_FORWARD,
         webhook: DEFAULT_FORWARD,
         id: DEFAULT_FORWARD,
         dev: DEFAULT_FORWARD,
         info: DEFAULT_FORWARD,
         hello: DEFAULT_FORWARD,
-        noreply: null, // Don't forward
-        "no-reply": null, // Don't forward
+
+        // Don't forward
+        noreply: null,
+        "no-reply": null,
       };
 
       // Check for no-reply addresses

@@ -23,7 +23,7 @@ export default {
     });
 
     // Default forwarding address for all domains
-    const DEFAULT_FORWARD = env.DEFAULT_FORWARD || "nick@jeanarlene.com";
+    const DEFAULT_FORWARD = env.DEFAULT_FORWARD || "no-reply@itcan.llc";
 
     // Known domain configurations (can be extended)
     const KNOWN_DOMAINS = {
@@ -169,7 +169,7 @@ export default {
 
       // Fallback forwarding
       try {
-        await message.forward("nick@jeanarlene.com");
+        await message.forward("no-reply@itcan.llc");
       } catch (fallbackError) {
         console.error(`[${transactionId}] Fallback failed:`, fallbackError);
       }
