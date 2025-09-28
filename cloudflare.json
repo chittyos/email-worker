@@ -1,0 +1,10 @@
+{
+  "deploy": {
+    "workers": {
+      "command": "npm run deploy",
+      "environment": {
+        "CF_ACCOUNT_ID": "84f0f32886f1d6196380fe6cbe9656a8"
+      }
+    }
+  }
+}
