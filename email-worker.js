@@ -207,6 +207,37 @@ export default {
           );
           forwardTo = MGMT_FORWARD;
         }
+      } else if (
+        [
+          "compliance",
+          "governance",
+          "risk",
+          "audit",
+          "regulatory",
+          "ethics",
+          "policy",
+          "grc",
+        ].includes(recipientLocal)
+      ) {
+        if (env.COMPLIANCE_ROUTER_URL) {
+          // Send to compliance/governance workstream
+          await sendToEvidenceRouter(
+            env,
+            message,
+            aiInsights,
+            transactionId,
+            "compliance",
+          );
+          console.log(
+            `[${transactionId}] Sent to compliance workstream: ${recipientLocal}@${recipientDomain}`,
+          );
+          return;
+        } else {
+          console.log(
+            `[${transactionId}] Compliance router not configured, forwarding to management`,
+          );
+          forwardTo = MGMT_FORWARD;
+        }
       } else if (specialRoutes[recipientLocal] !== undefined) {
         // Use special route if defined
         if (specialRoutes[recipientLocal] === null) {
@@ -225,10 +256,25 @@ export default {
           aiInsights.classification === "legal" ||
           aiInsights.classification === "contract"
         ) {
-          forwardTo = MGMT_FORWARD;
-          console.log(
-            `[${transactionId}] AI routing: legal/contract -> management`,
-          );
+          // Legal matters go to litigation workstream
+          if (env.EVIDENCE_ROUTER_URL) {
+            await sendToEvidenceRouter(
+              env,
+              message,
+              aiInsights,
+              transactionId,
+              "litigation",
+            );
+            console.log(
+              `[${transactionId}] AI detected legal/contract, sent to litigation workstream`,
+            );
+            return;
+          } else {
+            forwardTo = MGMT_FORWARD;
+            console.log(
+              `[${transactionId}] AI routing: legal/contract -> management`,
+            );
+          }
         } else if (
           aiInsights.classification === "complaint" &&
           aiInsights.sentiment === "angry"
@@ -287,6 +333,27 @@ export default {
               aiInsights.entities,
               transactionId,
             );
+          }
+        }
+
+        // Handle compliance/governance classifications
+        if (
+          ["compliance", "audit", "regulatory", "governance"].includes(
+            aiInsights.classification,
+          )
+        ) {
+          if (env.COMPLIANCE_ROUTER_URL) {
+            await sendToEvidenceRouter(
+              env,
+              message,
+              aiInsights,
+              transactionId,
+              "compliance",
+            );
+            console.log(
+              `[${transactionId}] AI detected ${aiInsights.classification} email, sent to compliance workstream`,
+            );
+            return; // Don't forward, already routed
           }
         }
       }
@@ -520,7 +587,8 @@ async function classifyEmail(ai, subject, body) {
   try {
     const prompt = `Classify this email into ONE category:
 Categories: invoice, receipt, contract, legal, support, complaint, meeting, calendar,
-newsletter, marketing, personal, business, api-notification, security-alert, spam, general
+newsletter, marketing, personal, business, api-notification, security-alert, compliance,
+audit, regulatory, governance, spam, general
 
 Subject: ${subject}
 Body (first 500 chars): ${body.substring(0, 500)}
@@ -548,6 +616,10 @@ Reply with only the category name.`;
       "business",
       "api-notification",
       "security-alert",
+      "compliance",
+      "audit",
+      "regulatory",
+      "governance",
       "spam",
       "general",
     ].includes(category)
