@@ -131,14 +131,6 @@ export default {
         nick: NICK_FORWARD,
         sharon: SHARON_FORWARD,
 
-        // Evidence/litigation intake (chitty.cc only)
-        evidence:
-          recipientDomain === "chitty.cc" ? MGMT_FORWARD : DEFAULT_FORWARD,
-        litigation:
-          recipientDomain === "chitty.cc" ? MGMT_FORWARD : DEFAULT_FORWARD,
-        intake:
-          recipientDomain === "chitty.cc" ? MGMT_FORWARD : DEFAULT_FORWARD,
-
         // Developer/API emails
         api: DEFAULT_FORWARD,
         webhook: DEFAULT_FORWARD,
@@ -163,8 +155,23 @@ export default {
         return;
       }
 
-      // Use special route if defined
-      if (specialRoutes[recipientLocal] !== undefined) {
+      // Check for evidence/litigation intake emails
+      if (["evidence", "litigation", "intake"].includes(recipientLocal)) {
+        if (env.EVIDENCE_ROUTER_URL) {
+          // Send to evidence processing worker
+          await sendToEvidenceRouter(env, message, aiInsights, transactionId);
+          console.log(
+            `[${transactionId}] Sent to evidence router: ${recipientLocal}@${recipientDomain}`,
+          );
+          return;
+        } else {
+          console.log(
+            `[${transactionId}] Evidence router not configured, forwarding to management`,
+          );
+          forwardTo = MGMT_FORWARD;
+        }
+      } else if (specialRoutes[recipientLocal] !== undefined) {
+        // Use special route if defined
         if (specialRoutes[recipientLocal] === null) {
           console.log(
             `[${transactionId}] Discarding email to ${recipientLocal}@${recipientDomain}`,
@@ -654,5 +661,46 @@ async function handleFinancialEmail(env, message, entities, transactionId) {
     );
   } catch (error) {
     console.error("Failed to store financial email:", error);
+  }
+}
+
+// Send email to evidence processing router
+async function sendToEvidenceRouter(env, message, aiInsights, transactionId) {
+  try {
+    const emailData = {
+      transactionId,
+      from: message.from,
+      to: message.to,
+      subject: message.headers.get("subject"),
+      timestamp: new Date().toISOString(),
+      aiInsights: aiInsights || {},
+      rawEmail: await message.raw(),
+    };
+
+    // Send to evidence router worker
+    const response = await fetch(env.EVIDENCE_ROUTER_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Transaction-ID": transactionId,
+        "X-ChittyOS-Event": "evidence-intake",
+      },
+      body: JSON.stringify(emailData),
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Evidence router returned ${response.status}: ${await response.text()}`,
+      );
+    }
+
+    console.log(`[${transactionId}] Successfully sent to evidence router`);
+  } catch (error) {
+    console.error(
+      `[${transactionId}] Failed to send to evidence router:`,
+      error,
+    );
+    // Fallback: forward to management
+    await message.forward("mgmt@aribia.llc");
   }
 }
