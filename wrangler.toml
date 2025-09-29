@@ -38,6 +38,7 @@ DOMAIN = "nevershitty.com"
 ENVIRONMENT = "production"
 DEFAULT_FORWARD = "no-reply@itcan.llc"
 EVIDENCE_ROUTER_URL = "https://router.chitty.cc/litigation/evidence/intake"
+FINANCE_ROUTER_URL = "https://router.chitty.cc/finance/intake"
 
 # Secrets (add via wrangler)
 # wrangler secret put CHITTY_API_KEY

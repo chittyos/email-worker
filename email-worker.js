@@ -159,14 +159,51 @@ export default {
       if (["evidence", "litigation", "intake"].includes(recipientLocal)) {
         if (env.EVIDENCE_ROUTER_URL) {
           // Send to evidence processing worker
-          await sendToEvidenceRouter(env, message, aiInsights, transactionId);
+          await sendToEvidenceRouter(
+            env,
+            message,
+            aiInsights,
+            transactionId,
+            "litigation",
+          );
           console.log(
-            `[${transactionId}] Sent to evidence router: ${recipientLocal}@${recipientDomain}`,
+            `[${transactionId}] Sent to litigation intake: ${recipientLocal}@${recipientDomain}`,
           );
           return;
         } else {
           console.log(
             `[${transactionId}] Evidence router not configured, forwarding to management`,
+          );
+          forwardTo = MGMT_FORWARD;
+        }
+      } else if (
+        [
+          "finance",
+          "accounting",
+          "invoice",
+          "invoices",
+          "billing",
+          "bill",
+          "pay",
+          "payment",
+        ].includes(recipientLocal)
+      ) {
+        if (env.FINANCE_ROUTER_URL) {
+          // Send to finance workstream
+          await sendToEvidenceRouter(
+            env,
+            message,
+            aiInsights,
+            transactionId,
+            "finance",
+          );
+          console.log(
+            `[${transactionId}] Sent to finance workstream: ${recipientLocal}@${recipientDomain}`,
+          );
+          return;
+        } else {
+          console.log(
+            `[${transactionId}] Finance router not configured, forwarding to management`,
           );
           forwardTo = MGMT_FORWARD;
         }
@@ -226,17 +263,31 @@ export default {
           });
         }
 
-        // Handle special classifications
+        // Handle special classifications - route to finance workstream
         if (
           aiInsights.classification === "invoice" ||
           aiInsights.classification === "receipt"
         ) {
-          await handleFinancialEmail(
-            env,
-            message,
-            aiInsights.entities,
-            transactionId,
-          );
+          if (env.FINANCE_ROUTER_URL) {
+            await sendToEvidenceRouter(
+              env,
+              message,
+              aiInsights,
+              transactionId,
+              "finance",
+            );
+            console.log(
+              `[${transactionId}] AI detected financial email, sent to finance workstream`,
+            );
+            return; // Don't forward, already routed
+          } else {
+            await handleFinancialEmail(
+              env,
+              message,
+              aiInsights.entities,
+              transactionId,
+            );
+          }
         }
       }
 
@@ -664,8 +715,14 @@ async function handleFinancialEmail(env, message, entities, transactionId) {
   }
 }
 
-// Send email to evidence processing router
-async function sendToEvidenceRouter(env, message, aiInsights, transactionId) {
+// Send email to workstream router (evidence/litigation or finance)
+async function sendToEvidenceRouter(
+  env,
+  message,
+  aiInsights,
+  transactionId,
+  workstream = "litigation",
+) {
   try {
     const emailData = {
       transactionId,
@@ -673,31 +730,43 @@ async function sendToEvidenceRouter(env, message, aiInsights, transactionId) {
       to: message.to,
       subject: message.headers.get("subject"),
       timestamp: new Date().toISOString(),
+      workstream, // "litigation" or "finance"
       aiInsights: aiInsights || {},
       rawEmail: await message.raw(),
     };
 
-    // Send to evidence router worker
-    const response = await fetch(env.EVIDENCE_ROUTER_URL, {
+    // Determine router URL based on workstream
+    const routerUrl =
+      workstream === "finance"
+        ? env.FINANCE_ROUTER_URL || env.EVIDENCE_ROUTER_URL
+        : env.EVIDENCE_ROUTER_URL;
+
+    if (!routerUrl) {
+      throw new Error(`No router URL configured for ${workstream} workstream`);
+    }
+
+    // Send to router worker
+    const response = await fetch(routerUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "X-Transaction-ID": transactionId,
-        "X-ChittyOS-Event": "evidence-intake",
+        "X-ChittyOS-Event": `${workstream}-intake`,
+        "X-Workstream": workstream,
       },
       body: JSON.stringify(emailData),
     });
 
     if (!response.ok) {
       throw new Error(
-        `Evidence router returned ${response.status}: ${await response.text()}`,
+        `${workstream} router returned ${response.status}: ${await response.text()}`,
       );
     }
 
-    console.log(`[${transactionId}] Successfully sent to evidence router`);
+    console.log(`[${transactionId}] Successfully sent to ${workstream} router`);
   } catch (error) {
     console.error(
-      `[${transactionId}] Failed to send to evidence router:`,
+      `[${transactionId}] Failed to send to ${workstream} router:`,
       error,
     );
     // Fallback: forward to management
