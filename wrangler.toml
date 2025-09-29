@@ -5,11 +5,15 @@ compatibility_flags = ["nodejs_compat"]
 account_id = "84f0f32886f1d6196380fe6cbe9656a8"
 workers_dev = true
 
-# Email routing trigger
+# Email routing trigger with AI enhancement
 # Email routing is configured in Cloudflare Dashboard
-# This worker handles email for multiple domains including nevershitty.com
-# Configure custom addresses in Cloudflare Dashboard
-# This worker will handle all @nevershitty.com emails
+# This worker handles email for multiple domains with AI-powered classification
+# Supports: nevershitty.com, chitty.cc, chicagofurnishedcondos.com, and more
+# Features: AI classification, sentiment analysis, urgency detection, smart routing
+
+# Workers AI binding for email processing
+[ai]
+binding = "AI"
 
 # KV namespaces for analytics and rate limiting
 [[kv_namespaces]]
@@ -22,10 +26,17 @@ binding = "RATE_LIMITS"
 id = "rate_limits_kv"
 preview_id = "rate_limits_preview"
 
+# Optional: Financial emails tracking
+[[kv_namespaces]]
+binding = "FINANCIAL_EMAILS"
+id = "financial_emails_kv"
+preview_id = "financial_emails_preview"
+
 # Environment variables
 [vars]
 DOMAIN = "nevershitty.com"
 ENVIRONMENT = "production"
+DEFAULT_FORWARD = "no-reply@itcan.llc"
 
 # Secrets (add via wrangler)
 # wrangler secret put CHITTY_API_KEY

@@ -1,6 +1,7 @@
 /**
- * Universal Email Worker for ChittyOS
+ * Universal Email Worker for ChittyOS with Workers AI
  * Automatically handles any domain configured in Cloudflare Email Routing
+ * Enhanced with AI-powered classification, sentiment analysis, and smart routing
  */
 
 export default {
@@ -33,6 +34,14 @@ export default {
       "chittyos.com": { priority: true },
       "mrniceweird.com": { priority: false },
       "chittyrouter.com": { priority: false },
+      "chicagofurnishedcondos.com": { priority: false },
+      "itcanbellc.com": { priority: true },
+      "aribia.llc": { priority: true },
+      "aribia.co": { priority: false },
+      "apt-arlene.llc": { priority: false },
+      "jeanarlene.com": { priority: false },
+      "nickyb.me": { priority: true },
+      "chittycorp.com": { priority: true },
       // Additional domains will use default config
     };
 
@@ -44,11 +53,53 @@ export default {
         return;
       }
 
-      // Spam check
-      if (await isSpam(message)) {
-        console.log(`[${transactionId}] Spam detected from ${message.from}`);
+      // Quick spam check (before AI)
+      if (await isSpamQuick(message)) {
+        console.log(
+          `[${transactionId}] Quick spam check failed from ${message.from}`,
+        );
         await message.setReject("Message classified as spam");
         return;
+      }
+
+      // AI-Enhanced Processing (if available)
+      let aiInsights = null;
+      if (env.AI) {
+        try {
+          const emailBody = await message.text();
+          const subject = message.headers.get("subject") || "";
+
+          aiInsights = await Promise.all([
+            classifyEmail(env.AI, subject, emailBody),
+            analyzeSentiment(env.AI, emailBody),
+            checkUrgency(env.AI, subject, emailBody),
+            extractEntities(env.AI, emailBody),
+          ]).then(([classification, sentiment, urgency, entities]) => ({
+            classification,
+            sentiment,
+            urgency,
+            entities,
+          }));
+
+          console.log(`[${transactionId}] AI Analysis:`, {
+            classification: aiInsights.classification,
+            sentiment: aiInsights.sentiment,
+            urgency: aiInsights.urgency,
+            entityCount: aiInsights.entities.length,
+          });
+
+          // Reject if AI detects spam
+          if (aiInsights.classification === "spam") {
+            console.log(`[${transactionId}] AI detected spam, rejecting`);
+            await message.setReject("Message classified as spam by AI");
+            return;
+          }
+        } catch (aiError) {
+          console.error(
+            `[${transactionId}] AI processing failed, continuing without AI:`,
+            aiError,
+          );
+        }
       }
 
       // Get domain config (use defaults if unknown)
@@ -56,11 +107,14 @@ export default {
         priority: false,
       };
 
-      // Determine forwarding address
+      // Determine forwarding address with AI-enhanced routing
       let forwardTo = DEFAULT_FORWARD;
 
       // Special routing for specific local parts
       const MGMT_FORWARD = "mgmt@aribia.llc";
+      const NICK_FORWARD = "nick@jeanarlene.com";
+      const SHARON_FORWARD = "sharon@itcanbellc.com";
+
       const specialRoutes = {
         // Management emails
         admin: MGMT_FORWARD,
@@ -74,8 +128,16 @@ export default {
         web: MGMT_FORWARD,
 
         // Personal routing
-        nick: "nick@jeanarlene.com",
-        sharon: "sharon@itcanbellc.com",
+        nick: NICK_FORWARD,
+        sharon: SHARON_FORWARD,
+
+        // Evidence/litigation intake (chitty.cc only)
+        evidence:
+          recipientDomain === "chitty.cc" ? MGMT_FORWARD : DEFAULT_FORWARD,
+        litigation:
+          recipientDomain === "chitty.cc" ? MGMT_FORWARD : DEFAULT_FORWARD,
+        intake:
+          recipientDomain === "chitty.cc" ? MGMT_FORWARD : DEFAULT_FORWARD,
 
         // Developer/API emails
         api: DEFAULT_FORWARD,
@@ -112,18 +174,92 @@ export default {
         forwardTo = specialRoutes[recipientLocal];
       }
 
+      // AI-Enhanced Smart Routing
+      if (aiInsights) {
+        // Override routing based on AI classification
+        if (
+          aiInsights.classification === "legal" ||
+          aiInsights.classification === "contract"
+        ) {
+          forwardTo = MGMT_FORWARD;
+          console.log(
+            `[${transactionId}] AI routing: legal/contract -> management`,
+          );
+        } else if (
+          aiInsights.classification === "complaint" &&
+          aiInsights.sentiment === "angry"
+        ) {
+          forwardTo = MGMT_FORWARD;
+          console.log(
+            `[${transactionId}] AI routing: angry complaint -> management`,
+          );
+        } else if (
+          aiInsights.urgency === "critical" ||
+          aiInsights.urgency === "high"
+        ) {
+          // Route urgent emails to management unless personal
+          if (!["nick", "sharon"].includes(recipientLocal)) {
+            forwardTo = MGMT_FORWARD;
+            console.log(
+              `[${transactionId}] AI routing: ${aiInsights.urgency} urgency -> management`,
+            );
+          }
+        }
+
+        // Store AI insights for analytics
+        if (env.EMAIL_ANALYTICS) {
+          await storeAIInsights(env, {
+            transactionId,
+            from: message.from,
+            to: message.to,
+            domain: recipientDomain,
+            ...aiInsights,
+            forwardedTo: forwardTo,
+            processingTime: Date.now() - startTime,
+          });
+        }
+
+        // Handle special classifications
+        if (
+          aiInsights.classification === "invoice" ||
+          aiInsights.classification === "receipt"
+        ) {
+          await handleFinancialEmail(
+            env,
+            message,
+            aiInsights.entities,
+            transactionId,
+          );
+        }
+      }
+
       // Check for priority
       const isPriority =
         domainConfig.priority ||
         ["legal", "security", "abuse"].includes(recipientLocal) ||
-        checkPrioritySender(message.from);
+        checkPrioritySender(message.from) ||
+        (aiInsights &&
+          (aiInsights.urgency === "high" || aiInsights.urgency === "critical"));
 
       // Add tracking headers
-      message.headers.set("X-Cloudflare-Worker", "chittyos-email-universal");
+      message.headers.set("X-Cloudflare-Worker", "chittyos-email-universal-ai");
       message.headers.set("X-Transaction-ID", transactionId);
       message.headers.set("X-Original-To", message.to);
       message.headers.set("X-Routed-Domain", recipientDomain);
       message.headers.set("X-Processing-Time", `${Date.now() - startTime}ms`);
+
+      // Add AI headers if available
+      if (aiInsights) {
+        message.headers.set("X-AI-Classification", aiInsights.classification);
+        message.headers.set("X-AI-Sentiment", aiInsights.sentiment);
+        message.headers.set("X-AI-Urgency", aiInsights.urgency);
+        if (aiInsights.entities.length > 0) {
+          message.headers.set(
+            "X-AI-Entities",
+            aiInsights.entities.length.toString(),
+          );
+        }
+      }
 
       if (isPriority) {
         message.headers.set("X-Priority", "High");
@@ -193,8 +329,8 @@ function checkPrioritySender(from) {
   return prioritySenders.some((sender) => fromLower.includes(sender));
 }
 
-// Spam detection
-async function isSpam(message) {
+// Quick spam detection (before AI)
+async function isSpamQuick(message) {
   const spamKeywords = [
     "viagra",
     "casino",
@@ -314,5 +450,209 @@ async function sendWebhook(url, data) {
     });
   } catch (error) {
     console.error("Webhook failed:", error);
+  }
+}
+
+// ============= AI FUNCTIONS =============
+
+// Classify email type using Workers AI
+async function classifyEmail(ai, subject, body) {
+  if (!ai) return "general";
+
+  try {
+    const prompt = `Classify this email into ONE category:
+Categories: invoice, receipt, contract, legal, support, complaint, meeting, calendar,
+newsletter, marketing, personal, business, api-notification, security-alert, spam, general
+
+Subject: ${subject}
+Body (first 500 chars): ${body.substring(0, 500)}
+
+Reply with only the category name.`;
+
+    const response = await ai.run("@cf/meta/llama-2-7b-chat-int8", {
+      prompt,
+      max_tokens: 10,
+    });
+
+    const category = response.response.toLowerCase().trim();
+    return [
+      "invoice",
+      "receipt",
+      "contract",
+      "legal",
+      "support",
+      "complaint",
+      "meeting",
+      "calendar",
+      "newsletter",
+      "marketing",
+      "personal",
+      "business",
+      "api-notification",
+      "security-alert",
+      "spam",
+      "general",
+    ].includes(category)
+      ? category
+      : "general";
+  } catch (error) {
+    console.error("AI classification failed:", error);
+    return "general";
+  }
+}
+
+// Analyze email sentiment using Workers AI
+async function analyzeSentiment(ai, body) {
+  if (!ai) return "neutral";
+
+  try {
+    const prompt = `Analyze the sentiment of this email:
+"${body.substring(0, 500)}"
+
+Reply with only: positive, negative, neutral, urgent, or angry`;
+
+    const response = await ai.run("@cf/meta/llama-2-7b-chat-int8", {
+      prompt,
+      max_tokens: 10,
+    });
+
+    const sentiment = response.response.toLowerCase().trim();
+    return ["positive", "negative", "neutral", "urgent", "angry"].includes(
+      sentiment,
+    )
+      ? sentiment
+      : "neutral";
+  } catch (error) {
+    console.error("AI sentiment analysis failed:", error);
+    return "neutral";
+  }
+}
+
+// Check urgency level using Workers AI
+async function checkUrgency(ai, subject, body) {
+  if (!ai) return "normal";
+
+  // Quick keyword check first
+  const urgentKeywords = [
+    "urgent",
+    "asap",
+    "emergency",
+    "critical",
+    "immediately",
+    "deadline",
+    "expire",
+    "final notice",
+    "action required",
+  ];
+  const combinedText = (subject + " " + body).toLowerCase();
+
+  const hasUrgentKeyword = urgentKeywords.some((keyword) =>
+    combinedText.includes(keyword),
+  );
+
+  if (!hasUrgentKeyword) return "normal";
+
+  try {
+    const prompt = `Rate the urgency of this email:
+Subject: ${subject}
+Body: ${body.substring(0, 300)}
+
+Reply with only: critical, high, normal, or low`;
+
+    const response = await ai.run("@cf/meta/llama-2-7b-chat-int8", {
+      prompt,
+      max_tokens: 10,
+    });
+
+    const urgency = response.response.toLowerCase().trim();
+    return ["critical", "high", "normal", "low"].includes(urgency)
+      ? urgency
+      : "normal";
+  } catch (error) {
+    console.error("AI urgency check failed:", error);
+    return hasUrgentKeyword ? "high" : "normal";
+  }
+}
+
+// Extract entities (dates, amounts, names, etc.) using Workers AI
+async function extractEntities(ai, body) {
+  if (!ai) return [];
+
+  try {
+    const prompt = `Extract important entities from this email:
+"${body.substring(0, 500)}"
+
+List any: dates, dollar amounts, company names, product names, or important numbers.
+Format: entity_type:value (one per line, max 5)`;
+
+    const response = await ai.run("@cf/meta/llama-2-7b-chat-int8", {
+      prompt,
+      max_tokens: 100,
+    });
+
+    const entities = response.response
+      .split("\n")
+      .filter((line) => line.includes(":"))
+      .map((line) => {
+        const [type, value] = line.split(":");
+        return { type: type.trim(), value: value.trim() };
+      })
+      .slice(0, 5);
+
+    return entities;
+  } catch (error) {
+    console.error("AI entity extraction failed:", error);
+    return [];
+  }
+}
+
+// Store AI insights for analytics
+async function storeAIInsights(env, insights) {
+  try {
+    const key = `ai:${insights.domain}:${insights.transactionId}`;
+    await env.EMAIL_ANALYTICS.put(
+      key,
+      JSON.stringify({
+        ...insights,
+        timestamp: new Date().toISOString(),
+      }),
+      {
+        expirationTtl: 86400 * 90, // Keep for 90 days
+        metadata: {
+          classification: insights.classification,
+          urgency: insights.urgency,
+          domain: insights.domain,
+        },
+      },
+    );
+  } catch (error) {
+    console.error("Failed to store AI insights:", error);
+  }
+}
+
+// Handle financial emails (invoices, receipts)
+async function handleFinancialEmail(env, message, entities, transactionId) {
+  if (!env.FINANCIAL_EMAILS) return;
+
+  const amounts = entities.filter(
+    (e) => e.type === "amount" || e.value.includes("$"),
+  );
+  const dates = entities.filter((e) => e.type === "date");
+
+  console.log(`[${transactionId}] Financial email:`, { amounts, dates });
+
+  try {
+    await env.FINANCIAL_EMAILS.put(
+      `financial:${transactionId}`,
+      JSON.stringify({
+        from: message.from,
+        subject: message.headers.get("subject"),
+        amounts,
+        dates,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+  } catch (error) {
+    console.error("Failed to store financial email:", error);
   }
 }
