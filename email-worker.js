@@ -16,10 +16,26 @@ export default {
     // Generate transaction ID
     const transactionId = `EMAIL-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
+    // Check for BCC tracking (bcc@chitty.cc)
+    const bccHeader = message.headers.get("bcc") || "";
+    const ccHeader = message.headers.get("cc") || "";
+    const isBccTracked = bccHeader.toLowerCase().includes("bcc@chitty.cc");
+    const isCcTracked = ccHeader.toLowerCase().includes("@chitty.cc");
+
+    // Check if sender is copying their own chitty.cc namespace
+    const fromEmail = message.from.toLowerCase();
+    const isNamespaceCopy =
+      fromEmail.includes("@chitty.cc") &&
+      (bccHeader.toLowerCase().includes(fromEmail) ||
+        ccHeader.toLowerCase().includes(fromEmail));
+
     console.log(`[${transactionId}] Email received:`, {
       from: message.from,
       to: message.to,
       domain: recipientDomain,
+      bccTracked: isBccTracked,
+      ccTracked: isCcTracked,
+      namespaceCopy: isNamespaceCopy,
       timestamp: new Date().toISOString(),
     });
 
@@ -143,6 +159,31 @@ export default {
         noreply: null,
         "no-reply": null,
       };
+
+      // Handle BCC tracking - bcc@chitty.cc creates certified tracking record
+      if (recipientLocal === "bcc" && recipientDomain === "chitty.cc") {
+        if (env.TRACKING_ROUTER_URL) {
+          await sendToCertifiedTracking(
+            env,
+            message,
+            aiInsights,
+            transactionId,
+          );
+          console.log(
+            `[${transactionId}] Created certified tracking record for BCC`,
+          );
+          return; // Don't forward BCC tracking emails
+        }
+      }
+
+      // Handle namespace copy tracking (e.g., nick@chitty.cc copying themselves)
+      if (isNamespaceCopy && env.TRACKING_ROUTER_URL) {
+        await sendToNamespaceTracking(env, message, aiInsights, transactionId);
+        console.log(
+          `[${transactionId}] Recorded namespace copy for ${fromEmail}`,
+        );
+        // Continue to also forward/route the email normally
+      }
 
       // Check for no-reply addresses
       if (
@@ -386,6 +427,18 @@ export default {
         }
       }
 
+      // Add tracking headers
+      if (isBccTracked) {
+        message.headers.set("X-ChittyOS-BCC-Tracked", "true");
+        message.headers.set("X-ChittyOS-Certified-Tracking", "enabled");
+      }
+      if (isCcTracked) {
+        message.headers.set("X-ChittyOS-CC-Tracked", "true");
+      }
+      if (isNamespaceCopy) {
+        message.headers.set("X-ChittyOS-Namespace-Copy", fromEmail);
+      }
+
       if (isPriority) {
         message.headers.set("X-Priority", "High");
         message.headers.set("Importance", "high");
@@ -396,6 +449,20 @@ export default {
         `[${transactionId}] Forwarding to ${forwardTo} (priority: ${isPriority})`,
       );
       await message.forward(forwardTo);
+
+      // Send feedback to sender if from chitty.cc domain
+      if (env.FEEDBACK_ENABLED === "true" && fromEmail.includes("@chitty.cc")) {
+        await sendFeedbackToSender(env, {
+          transactionId,
+          from: message.from,
+          to: message.to,
+          forwardedTo: forwardTo,
+          aiInsights,
+          isBccTracked,
+          isNamespaceCopy,
+          isPriority,
+        });
+      }
 
       // Log analytics
       if (env.EMAIL_ANALYTICS) {
@@ -811,7 +878,9 @@ async function sendToEvidenceRouter(
     const routerUrl =
       workstream === "finance"
         ? env.FINANCE_ROUTER_URL || env.EVIDENCE_ROUTER_URL
-        : env.EVIDENCE_ROUTER_URL;
+        : workstream === "compliance"
+          ? env.COMPLIANCE_ROUTER_URL || env.EVIDENCE_ROUTER_URL
+          : env.EVIDENCE_ROUTER_URL;
 
     if (!routerUrl) {
       throw new Error(`No router URL configured for ${workstream} workstream`);
@@ -843,5 +912,194 @@ async function sendToEvidenceRouter(
     );
     // Fallback: forward to management
     await message.forward("mgmt@aribia.llc");
+  }
+}
+
+// Send to certified tracking system (bcc@chitty.cc)
+async function sendToCertifiedTracking(
+  env,
+  message,
+  aiInsights,
+  transactionId,
+) {
+  try {
+    const trackingData = {
+      transactionId,
+      trackingType: "certified-bcc",
+      from: message.from,
+      to: message.to,
+      cc: message.headers.get("cc") || "",
+      bcc: message.headers.get("bcc") || "",
+      subject: message.headers.get("subject"),
+      timestamp: new Date().toISOString(),
+      messageId: message.headers.get("message-id"),
+      aiInsights: aiInsights || {},
+      rawEmail: await message.raw(),
+      certificationLevel: "bcc-tracking",
+    };
+
+    const response = await fetch(env.TRACKING_ROUTER_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Transaction-ID": transactionId,
+        "X-ChittyOS-Event": "certified-tracking",
+        "X-Tracking-Type": "bcc",
+      },
+      body: JSON.stringify(trackingData),
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Tracking router returned ${response.status}: ${await response.text()}`,
+      );
+    }
+
+    console.log(
+      `[${transactionId}] Successfully created certified tracking record`,
+    );
+  } catch (error) {
+    console.error(
+      `[${transactionId}] Failed to create tracking record:`,
+      error,
+    );
+  }
+}
+
+// Send to namespace tracking system (user copying their own namespace)
+async function sendToNamespaceTracking(
+  env,
+  message,
+  aiInsights,
+  transactionId,
+) {
+  try {
+    const trackingData = {
+      transactionId,
+      trackingType: "namespace-copy",
+      from: message.from,
+      to: message.to,
+      cc: message.headers.get("cc") || "",
+      bcc: message.headers.get("bcc") || "",
+      subject: message.headers.get("subject"),
+      timestamp: new Date().toISOString(),
+      messageId: message.headers.get("message-id"),
+      namespace: message.from.split("@")[0],
+      aiInsights: aiInsights || {},
+    };
+
+    const response = await fetch(env.TRACKING_ROUTER_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Transaction-ID": transactionId,
+        "X-ChittyOS-Event": "namespace-tracking",
+        "X-Tracking-Type": "namespace-copy",
+      },
+      body: JSON.stringify(trackingData),
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Tracking router returned ${response.status}: ${await response.text()}`,
+      );
+    }
+
+    console.log(
+      `[${transactionId}] Successfully recorded namespace copy tracking`,
+    );
+  } catch (error) {
+    console.error(
+      `[${transactionId}] Failed to record namespace tracking:`,
+      error,
+    );
+  }
+}
+
+
+// Send feedback notification to sender
+async function sendFeedbackToSender(env, feedbackData) {
+  try {
+    const {
+      transactionId,
+      from,
+      to,
+      forwardedTo,
+      aiInsights,
+      isBccTracked,
+      isNamespaceCopy,
+      isPriority,
+    } = feedbackData;
+
+    // Build feedback message
+    let feedbackText = `ChittyOS Email Routing Confirmation
+
+`;
+    feedbackText += `Transaction ID: ${transactionId}
+`;
+    feedbackText += `From: ${from}
+`;
+    feedbackText += `To: ${to}
+`;
+    feedbackText += `Forwarded to: ${forwardedTo}
+`;
+    feedbackText += `Priority: ${isPriority ? "High" : "Normal"}
+
+`;
+
+    if (aiInsights) {
+      feedbackText += `AI Analysis:
+`;
+      feedbackText += `- Classification: ${aiInsights.classification}
+`;
+      feedbackText += `- Sentiment: ${aiInsights.sentiment}
+`;
+      feedbackText += `- Urgency: ${aiInsights.urgency}
+`;
+      if (aiInsights.entities && aiInsights.entities.length > 0) {
+        feedbackText += `- Entities detected: ${aiInsights.entities.length}
+`;
+      }
+      feedbackText += `
+`;
+    }
+
+    if (isBccTracked) {
+      feedbackText += `✓ Certified tracking enabled (bcc@chitty.cc detected)
+`;
+    }
+
+    if (isNamespaceCopy) {
+      feedbackText += `✓ Namespace copy recorded
+`;
+    }
+
+    feedbackText += `
+View details: https://portal.chitty.cc/tracking/${transactionId}
+`;
+
+    // Send to notification endpoint
+    const response = await fetch(env.TRACKING_ROUTER_URL + "/feedback", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Transaction-ID": transactionId,
+        "X-ChittyOS-Event": "feedback-notification",
+      },
+      body: JSON.stringify({
+        transactionId,
+        recipient: from,
+        feedbackText,
+        metadata: feedbackData,
+        timestamp: new Date().toISOString(),
+      }),
+    });
+
+    if (response.ok) {
+      console.log(`[${transactionId}] Feedback sent to ${from}`);
+    }
+  } catch (error) {
+    console.error(`Failed to send feedback:`, error);
+    // Do not fail the email processing if feedback fails
   }
 }
