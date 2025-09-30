@@ -5,6 +5,12 @@
  */
 
 export default {
+  async scheduled(event, env, ctx) {
+    // Weekly impact report cron job
+    console.log("Running weekly impact report...");
+    await generateWeeklyImpactReport(env);
+  },
+
   async email(message, env, ctx) {
     const startTime = Date.now();
 
@@ -1016,7 +1022,6 @@ async function sendToNamespaceTracking(
   }
 }
 
-
 // Send feedback notification to sender
 async function sendFeedbackToSender(env, feedbackData) {
   try {
@@ -1102,4 +1107,215 @@ View details: https://portal.chitty.cc/tracking/${transactionId}
     console.error(`Failed to send feedback:`, error);
     // Do not fail the email processing if feedback fails
   }
+}
+
+
+// Generate weekly impact report
+async function generateWeeklyImpactReport(env) {
+  try {
+    const now = new Date();
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    
+    console.log(`Generating impact report for ${weekAgo.toISOString()} to ${now.toISOString()}`);
+
+    // Fetch analytics from KV
+    const stats = {
+      totalEmails: 0,
+      workstreams: {
+        litigation: 0,
+        finance: 0,
+        compliance: 0,
+      },
+      aiClassifications: {},
+      urgencyLevels: {
+        critical: 0,
+        high: 0,
+        normal: 0,
+        low: 0,
+      },
+      sentiments: {
+        positive: 0,
+        negative: 0,
+        neutral: 0,
+        urgent: 0,
+        angry: 0,
+      },
+      tracking: {
+        bccTracked: 0,
+        namespaceCopies: 0,
+      },
+      domains: {},
+      topSenders: {},
+    };
+
+    // Query EMAIL_ANALYTICS KV for the week's data
+    if (env.EMAIL_ANALYTICS) {
+      const listResult = await env.EMAIL_ANALYTICS.list({ prefix: "ai:" });
+      
+      for (const key of listResult.keys) {
+        const data = await env.EMAIL_ANALYTICS.get(key.name);
+        if (!data) continue;
+        
+        try {
+          const email = JSON.parse(data);
+          const emailDate = new Date(email.timestamp);
+          
+          // Only include emails from the last week
+          if (emailDate < weekAgo) continue;
+          
+          stats.totalEmails++;
+          
+          // Track workstreams
+          if (email.workstream) {
+            stats.workstreams[email.workstream] = (stats.workstreams[email.workstream] || 0) + 1;
+          }
+          
+          // Track AI classifications
+          if (email.classification) {
+            stats.aiClassifications[email.classification] = 
+              (stats.aiClassifications[email.classification] || 0) + 1;
+          }
+          
+          // Track urgency
+          if (email.urgency && stats.urgencyLevels[email.urgency] !== undefined) {
+            stats.urgencyLevels[email.urgency]++;
+          }
+          
+          // Track sentiment
+          if (email.sentiment && stats.sentiments[email.sentiment] !== undefined) {
+            stats.sentiments[email.sentiment]++;
+          }
+          
+          // Track domains
+          if (email.domain) {
+            stats.domains[email.domain] = (stats.domains[email.domain] || 0) + 1;
+          }
+          
+          // Track senders
+          if (email.from) {
+            stats.topSenders[email.from] = (stats.topSenders[email.from] || 0) + 1;
+          }
+        } catch (parseError) {
+          console.error("Failed to parse analytics entry:", parseError);
+        }
+      }
+    }
+
+    // Build report
+    const report = buildImpactReport(stats, weekAgo, now);
+    
+    // Send report to tracking router
+    await fetch(env.TRACKING_ROUTER_URL + "/reports", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-ChittyOS-Event": "weekly-impact-report",
+      },
+      body: JSON.stringify({
+        reportType: "weekly-impact",
+        period: {
+          start: weekAgo.toISOString(),
+          end: now.toISOString(),
+        },
+        stats,
+        report,
+        timestamp: now.toISOString(),
+      }),
+    });
+
+    console.log("Weekly impact report generated and sent successfully");
+    console.log(report);
+  } catch (error) {
+    console.error("Failed to generate weekly impact report:", error);
+  }
+}
+
+// Build formatted impact report
+function buildImpactReport(stats, startDate, endDate) {
+  const topSenders = Object.entries(stats.topSenders)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10);
+  
+  const topDomains = Object.entries(stats.domains)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10);
+  
+  const topClassifications = Object.entries(stats.aiClassifications)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10);
+
+  let report = `
+╔════════════════════════════════════════════════════════════════╗
+║          ChittyOS Email Worker - Weekly Impact Report         ║
+╚════════════════════════════════════════════════════════════════╝
+
+Period: ${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}
+Generated: ${endDate.toISOString()}
+
+═══════════════════════════════════════════════════════════════
+
+📊 OVERALL STATISTICS
+────────────────────────────────────────────────────────────────
+Total Emails Processed:     ${stats.totalEmails.toLocaleString()}
+
+🔀 WORKSTREAM DISTRIBUTION
+────────────────────────────────────────────────────────────────
+Litigation:                 ${stats.workstreams.litigation.toLocaleString()} emails (${((stats.workstreams.litigation / stats.totalEmails) * 100 || 0).toFixed(1)}%)
+Finance:                    ${stats.workstreams.finance.toLocaleString()} emails (${((stats.workstreams.finance / stats.totalEmails) * 100 || 0).toFixed(1)}%)
+Compliance:                 ${stats.workstreams.compliance.toLocaleString()} emails (${((stats.workstreams.compliance / stats.totalEmails) * 100 || 0).toFixed(1)}%)
+
+🤖 AI CLASSIFICATION BREAKDOWN
+────────────────────────────────────────────────────────────────
+${topClassifications.map(([type, count]) => 
+  \`\${type.padEnd(25)} \${count.toString().padStart(6)} (\${((count / stats.totalEmails) * 100).toFixed(1)}%)\`
+).join("\n") || "No classifications"}
+
+⚡ URGENCY LEVELS
+────────────────────────────────────────────────────────────────
+Critical:                   ${stats.urgencyLevels.critical.toLocaleString()} (${((stats.urgencyLevels.critical / stats.totalEmails) * 100 || 0).toFixed(1)}%)
+High:                       ${stats.urgencyLevels.high.toLocaleString()} (${((stats.urgencyLevels.high / stats.totalEmails) * 100 || 0).toFixed(1)}%)
+Normal:                     ${stats.urgencyLevels.normal.toLocaleString()} (${((stats.urgencyLevels.normal / stats.totalEmails) * 100 || 0).toFixed(1)}%)
+Low:                        ${stats.urgencyLevels.low.toLocaleString()} (${((stats.urgencyLevels.low / stats.totalEmails) * 100 || 0).toFixed(1)}%)
+
+😊 SENTIMENT ANALYSIS
+────────────────────────────────────────────────────────────────
+Positive:                   ${stats.sentiments.positive.toLocaleString()} (${((stats.sentiments.positive / stats.totalEmails) * 100 || 0).toFixed(1)}%)
+Negative:                   ${stats.sentiments.negative.toLocaleString()} (${((stats.sentiments.negative / stats.totalEmails) * 100 || 0).toFixed(1)}%)
+Neutral:                    ${stats.sentiments.neutral.toLocaleString()} (${((stats.sentiments.neutral / stats.totalEmails) * 100 || 0).toFixed(1)}%)
+Urgent:                     ${stats.sentiments.urgent.toLocaleString()} (${((stats.sentiments.urgent / stats.totalEmails) * 100 || 0).toFixed(1)}%)
+Angry:                      ${stats.sentiments.angry.toLocaleString()} (${((stats.sentiments.angry / stats.totalEmails) * 100 || 0).toFixed(1)}%)
+
+📍 TRACKING FEATURES
+────────────────────────────────────────────────────────────────
+BCC Tracked (Certified):    ${stats.tracking.bccTracked.toLocaleString()}
+Namespace Copies:           ${stats.tracking.namespaceCopies.toLocaleString()}
+
+🌐 TOP DOMAINS
+────────────────────────────────────────────────────────────────
+${topDomains.map(([domain, count], idx) => 
+  \`\${(idx + 1).toString().padStart(2)}. \${domain.padEnd(35)} \${count.toString().padStart(6)}\`
+).join("\n") || "No domains"}
+
+👥 TOP SENDERS
+────────────────────────────────────────────────────────────────
+${topSenders.map(([sender, count], idx) => 
+  \`\${(idx + 1).toString().padStart(2)}. \${sender.substring(0, 35).padEnd(35)} \${count.toString().padStart(6)}\`
+).join("\n") || "No senders"}
+
+═══════════════════════════════════════════════════════════════
+
+📈 KEY INSIGHTS
+────────────────────────────────────────────────────────────────
+• Average emails per day: ${(stats.totalEmails / 7).toFixed(1)}
+• Most active workstream: ${Object.entries(stats.workstreams).sort((a,b) => b[1] - a[1])[0]?.[0] || "N/A"}
+• Highest urgency rate: ${((stats.urgencyLevels.critical + stats.urgencyLevels.high) / stats.totalEmails * 100 || 0).toFixed(1)}% critical/high
+• Sentiment balance: ${((stats.sentiments.positive / (stats.sentiments.positive + stats.sentiments.negative) * 100) || 0).toFixed(1)}% positive
+
+View detailed analytics: https://portal.chitty.cc/analytics/weekly
+
+🤖 Generated by ChittyOS Email Worker
+═══════════════════════════════════════════════════════════════
+`;
+
+  return report;
 }

@@ -46,3 +46,6 @@ FEEDBACK_ENABLED = "true"
 # Secrets (add via wrangler)
 # wrangler secret put CHITTY_API_KEY
 # wrangler secret put WEBHOOK_URL
+# Cron triggers for weekly impact reports
+[[triggers.crons]]
+cron = "0 9 * * MON"  # Weekly impact report every Monday at 9am
